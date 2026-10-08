@@ -1,0 +1,62 @@
+# --- Secrets & credentials (never commit these) ---
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+secrets.json
+credentials.json
+.streamlit/secrets.toml
+
+# --- Data files (keep data out of the repo) ---
+data/
+raw/
+output/
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.pkl
+*.sqlite
+*.db
+*.zip
+*.7z
+
+# --- Subsurface / reservoir data formats ---
+*.las
+*.segy
+*.sgy
+*.dlis
+*.ecl
+*.egrid
+*.unrst
+*.smspec
+
+# --- Power BI ---
+*.pbix
+*.pbit
+.pbi/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# --- Logs & temp ---
+*.log
+*.tmp
+~$*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
