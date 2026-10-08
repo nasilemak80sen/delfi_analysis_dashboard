@@ -116,6 +116,155 @@ def convert_csv_to_parquet(
     return parquet_path
 
 
+def _inventory_metrics(con, relation_sql: str) -> dict[str, object]:
+    row = con.execute(
+        f"""
+        SELECT
+            COUNT(*) AS total_rows,
+            COUNT(*) FILTER (WHERE ItemType = 'File') AS file_count,
+            COUNT(*) FILTER (WHERE ItemType = 'Folder') AS folder_count,
+            COALESCE(
+                SUM(SizeGB) FILTER (WHERE ItemType = 'File'),
+                0
+            ) AS total_file_storage_gb,
+            COUNT(*) FILTER (
+                WHERE ItemType = 'File'
+                  AND IsSimulationFile = 'Yes'
+            ) AS simulation_file_count,
+            COUNT(DISTINCT FullPath) AS distinct_paths,
+            COUNT(*) - COUNT(DISTINCT FullPath) AS duplicate_path_rows,
+            COUNT(*) FILTER (
+                WHERE FullPath IS NULL OR FullPath = ''
+            ) AS missing_paths,
+            MAX(Depth) AS max_depth
+        FROM {relation_sql}
+        """
+    ).fetchone()
+
+    return {
+        "total_rows": int(row[0] or 0),
+        "file_count": int(row[1] or 0),
+        "folder_count": int(row[2] or 0),
+        "total_file_storage_gb": float(row[3] or 0.0),
+        "simulation_file_count": int(row[4] or 0),
+        "distinct_paths": int(row[5] or 0),
+        "duplicate_path_rows": int(row[6] or 0),
+        "missing_paths": int(row[7] or 0),
+        "max_depth": int(row[8] or 0),
+    }
+
+
+def _inventory_groups(con, relation_sql: str) -> dict[tuple[str, str, str], tuple[int, float]]:
+    rows = con.execute(
+        f"""
+        SELECT
+            COALESCE(Drive, '') AS Drive,
+            COALESCE(ItemType, '') AS ItemType,
+            COALESCE(FileCategory, '') AS FileCategory,
+            COUNT(*) AS row_count,
+            COALESCE(
+                SUM(SizeGB) FILTER (WHERE ItemType = 'File'),
+                0
+            ) AS storage_gb
+        FROM {relation_sql}
+        GROUP BY Drive, ItemType, FileCategory
+        """
+    ).fetchall()
+
+    return {
+        (str(row[0]), str(row[1]), str(row[2])): (
+            int(row[3]),
+            float(row[4] or 0.0),
+        )
+        for row in rows
+    }
+
+
+def reconcile_csv_parquet(
+    csv_path: Path,
+    parquet_path: Path,
+    memory_limit: str | None = None,
+    size_tolerance_gb: float = 1e-6,
+) -> dict[str, object]:
+    csv_path = Path(csv_path)
+    parquet_path = Path(parquet_path)
+
+    if not csv_path.exists():
+        raise FileNotFoundError(csv_path)
+    if not parquet_path.exists():
+        raise FileNotFoundError(parquet_path)
+    if size_tolerance_gb < 0:
+        raise ValueError("size_tolerance_gb must be >= 0")
+
+    con = connect(memory_limit=memory_limit)
+    try:
+        csv_relation = _csv_relation_sql(csv_path)
+        parquet_relation = f"read_parquet('{_sql_path(parquet_path)}')"
+
+        csv_metrics = _inventory_metrics(con, csv_relation)
+        parquet_metrics = _inventory_metrics(con, parquet_relation)
+
+        scalar_differences: dict[str, object] = {}
+        for key in (
+            "total_rows",
+            "file_count",
+            "folder_count",
+            "simulation_file_count",
+            "distinct_paths",
+            "duplicate_path_rows",
+            "missing_paths",
+            "max_depth",
+        ):
+            if csv_metrics[key] != parquet_metrics[key]:
+                scalar_differences[key] = {
+                    "csv": csv_metrics[key],
+                    "parquet": parquet_metrics[key],
+                }
+
+        csv_storage = float(csv_metrics["total_file_storage_gb"])
+        parquet_storage = float(parquet_metrics["total_file_storage_gb"])
+        storage_delta = parquet_storage - csv_storage
+        if abs(storage_delta) > size_tolerance_gb:
+            scalar_differences["total_file_storage_gb"] = {
+                "csv": csv_storage,
+                "parquet": parquet_storage,
+                "delta": storage_delta,
+            }
+
+        csv_groups = _inventory_groups(con, csv_relation)
+        parquet_groups = _inventory_groups(con, parquet_relation)
+
+        group_differences: list[dict[str, object]] = []
+        for key in sorted(set(csv_groups) | set(parquet_groups)):
+            csv_value = csv_groups.get(key, (0, 0.0))
+            parquet_value = parquet_groups.get(key, (0, 0.0))
+            if (
+                csv_value[0] != parquet_value[0]
+                or abs(csv_value[1] - parquet_value[1]) > size_tolerance_gb
+            ):
+                group_differences.append(
+                    {
+                        "drive": key[0],
+                        "item_type": key[1],
+                        "file_category": key[2],
+                        "csv_count": csv_value[0],
+                        "parquet_count": parquet_value[0],
+                        "csv_storage_gb": csv_value[1],
+                        "parquet_storage_gb": parquet_value[1],
+                    }
+                )
+
+        return {
+            "ok": not scalar_differences and not group_differences,
+            "csv_metrics": csv_metrics,
+            "parquet_metrics": parquet_metrics,
+            "scalar_differences": scalar_differences,
+            "group_differences": group_differences,
+        }
+    finally:
+        con.close()
+
+
 def create_analytics_database(
     parquet_path: Path,
     database_path: Path,
