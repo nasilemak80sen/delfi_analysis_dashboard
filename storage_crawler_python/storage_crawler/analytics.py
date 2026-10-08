@@ -191,6 +191,7 @@ def create_analytics_database(
                 Drive,
                 FileCategory,
                 CASE
+                    WHEN age_days IS NULL THEN 'Unknown'
                     WHEN age_days < 30 THEN '<30d'
                     WHEN age_days < 90 THEN '30-89d'
                     WHEN age_days < 365 THEN '90-364d'
@@ -295,6 +296,7 @@ def create_analytics_database(
                 L4_Name,
                 FileCategory,
                 CASE
+                    WHEN age_days IS NULL THEN 'Unknown'
                     WHEN age_days < 30 THEN '<30d'
                     WHEN age_days < 90 THEN '30-89d'
                     WHEN age_days < 365 THEN '90-364d'
