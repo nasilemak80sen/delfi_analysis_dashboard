@@ -54,12 +54,16 @@ def convert_csv_to_parquet(
             f"""
             COPY (
                 SELECT *
-                FROM read_csv_auto(
+                FROM read_csv(
                     '{source}',
                     header = true,
-                    sample_size = 100000,
+                    delim = ',',
+                    quote = '"',
+                    escape = '"',
+                    sample_size = -1,
                     union_by_name = true,
-                    strict_mode = true
+                    strict_mode = true,
+                    null_padding = false
                 )
             )
             TO '{target}'
