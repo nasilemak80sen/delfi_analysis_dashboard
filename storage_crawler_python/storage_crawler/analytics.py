@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .config import CSV_HEADERS, HIERARCHY_LEVELS
+
 
 def _sql_path(path: Path) -> str:
     return os.fspath(Path(path)).replace("'", "''")
@@ -31,25 +33,40 @@ def connect(
     return con
 
 
-CSV_DUCKDB_TYPES = {
-    "Drive": "VARCHAR",
-    "ItemID": "BIGINT",
-    "ParentID": "BIGINT",
-    "ItemType": "VARCHAR",
-    "ItemName": "VARCHAR",
-    "FileExtension": "VARCHAR",
-    "FullPath": "VARCHAR",
-    "Depth": "BIGINT",
-    "Owner": "VARCHAR",
-    "SizeMB": "DOUBLE",
-    "SizeGB": "DOUBLE",
-    "FileCountInFolder": "BIGINT",
-    "LastModified": "VARCHAR",
-    "IsSimulationFile": "VARCHAR",
-    "FileCategory": "VARCHAR",
-    "ScanDateTime": "VARCHAR",
-    **{f"L{i}_Name": "VARCHAR" for i in range(1, 11)},
-}
+_FIXED_DUCKDB_TYPES = [
+    "VARCHAR",
+    "BIGINT",
+    "BIGINT",
+    "VARCHAR",
+    "VARCHAR",
+    "VARCHAR",
+    "VARCHAR",
+    "BIGINT",
+    "VARCHAR",
+    "DOUBLE",
+    "DOUBLE",
+    "BIGINT",
+    "VARCHAR",
+    "VARCHAR",
+    "VARCHAR",
+    "VARCHAR",
+]
+
+if len(_FIXED_DUCKDB_TYPES) != 16:
+    raise RuntimeError("Crawler CSV fixed schema must contain 16 columns")
+
+CSV_DUCKDB_TYPES = dict(
+    zip(
+        CSV_HEADERS[:16],
+        _FIXED_DUCKDB_TYPES,
+    )
+)
+CSV_DUCKDB_TYPES.update(
+    {f"L{i}_Name": "VARCHAR" for i in range(1, HIERARCHY_LEVELS + 1)}
+)
+
+if list(CSV_DUCKDB_TYPES) != CSV_HEADERS:
+    raise RuntimeError("DuckDB ingestion schema does not match CSV_HEADERS")
 
 _CSV_COLUMNS_SQL = "{ " + ", ".join(
     f"'{name}': '{dtype}'" for name, dtype in CSV_DUCKDB_TYPES.items()
