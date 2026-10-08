@@ -136,7 +136,7 @@ def create_analytics_database(
                       AND (SizeGB IS NULL OR SizeGB < 0)
                 ) AS invalid_file_sizes,
                 COUNT(*) FILTER (
-                    WHERE LastModified IS NULL OR LastModified = ''
+                    WHERE LastModified IS NULL
                 ) AS missing_modified_dates
             FROM storage_detail
             """
@@ -209,10 +209,7 @@ def create_analytics_database(
                     *,
                     date_diff(
                         'day',
-                        try_strptime(
-                            LastModified,
-                            '%Y-%m-%d %H:%M:%S'
-                        ),
+                        LastModified,
                         current_timestamp
                     ) AS age_days
                 FROM storage_detail
@@ -238,25 +235,16 @@ def create_analytics_database(
                 LastModified,
                 date_diff(
                     'day',
-                    try_strptime(
-                        LastModified,
-                        '%Y-%m-%d %H:%M:%S'
-                    ),
+                    LastModified,
                     current_timestamp
                 ) AS age_days,
                 IsSimulationFile
             FROM storage_detail
             WHERE ItemType = 'File'
-              AND try_strptime(
-                    LastModified,
-                    '%Y-%m-%d %H:%M:%S'
-                  ) IS NOT NULL
+              AND LastModified IS NOT NULL
               AND date_diff(
                     'day',
-                    try_strptime(
-                        LastModified,
-                        '%Y-%m-%d %H:%M:%S'
-                    ),
+                    LastModified,
                     current_timestamp
                   ) >= {int(stale_days)}
             ORDER BY SizeGB DESC
@@ -321,10 +309,7 @@ def create_analytics_database(
                     *,
                     date_diff(
                         'day',
-                        try_strptime(
-                            LastModified,
-                            '%Y-%m-%d %H:%M:%S'
-                        ),
+                        LastModified,
                         current_timestamp
                     ) AS age_days
                 FROM storage_detail
