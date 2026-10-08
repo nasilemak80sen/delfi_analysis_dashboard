@@ -15,7 +15,7 @@ The project is intentionally split into:
 3. Avoid materialising the entire filesystem into one `$allItems`-equivalent collection.
 4. Keep owner retrieval optional and cached.
 5. Make file classification configurable in one place.
-6. Keep CSV as the compatibility output and add optional Parquet support.
+6. Make Parquet the primary analytical output and keep CSV as an optional compatibility/export format.
 7. Make the crawler testable without requiring access to the production drive.
 
 ## Requirements
@@ -84,6 +84,30 @@ python -m storage_crawler.main `
 - Files are classified from their extensions using `storage_crawler/classifier.py`.
 - The owner lookup intentionally mirrors the current optimisation: direct ACL lookup for depth <= 3, then parent-owner inheritance where available.
 
+## CSV -> Parquet pipeline validation
+
+After converting an existing inventory CSV, reconcile the source CSV and generated
+Parquet without loading the full dataset into pandas:
+
+```powershell
+py -3.13 scripts\\validate_pipeline.py `
+  --csv "path\\to\\STORAGE_ANALYSIS.csv" `
+  --parquet "path\\to\\STORAGE_ANALYSIS.parquet" `
+  --memory-limit 4GB
+```
+
+The reconciliation checks:
+- total rows
+- file/folder counts
+- total file storage
+- simulation file count
+- distinct and duplicate paths
+- missing paths
+- maximum depth
+- file-category counts and storage by drive/item type
+
+The command exits with code `0` only when the source and Parquet metrics reconcile.
+
 ## Validation against the existing PowerShell crawler
 
 After running both crawlers against the same test/production root, use:
@@ -110,7 +134,31 @@ It deliberately does not require identical `ItemID` values or row order.
 2. Run the PowerShell crawler on the same test folder.
 3. Compare results.
 4. Run `pytest -q`.
-5. Move to the production drive.
-6. Build the Jupyter analysis layer.
-7. Feed the validated dataset to Power BI.
+5. Convert the production CSV to Parquet with the schema-driven pipeline.
+6. Run `scripts\validate_pipeline.py` and investigate any differences.
+7. Build the DuckDB analytical layer and validate its summary tables.
+8. Build the Jupyter analysis layer.
+9. Feed the validated dataset to Power BI.
+
+
+
+## Large-data architecture
+
+For large inventories, Parquet is the primary storage format and CSV is only a
+compatibility/export format. DuckDB sits above Parquet and builds small analytical
+tables for Jupyter and Power BI.
+
+The crawler writes Parquet in bounded batches through PyArrow. It does not build
+the full inventory in pandas.
+
+For an existing large CSV:
+
+py -3.13 -m pip install --user duckdb pyarrow pandas jupyterlab
+
+py -3.13 scripts\build_analytics.py --csv "C:\path\to\STORAGE_ANALYSIS.csv" --memory-limit 4GB
+
+This produces a Parquet file, a small DuckDB database, and compact summary tables.
+
+Do not use a full-data pandas read such as df = pd.read_csv(...) for the 3.5 GB
+inventory.
 

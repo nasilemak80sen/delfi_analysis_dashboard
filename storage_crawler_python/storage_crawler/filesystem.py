@@ -135,6 +135,33 @@ def _scan_directory(
     total_size_gb = 0.0
     direct_file_count = 0
 
+    # At max depth the folder row is retained, but its children are not
+    # part of the dataset. Do not enumerate that directory.
+    if depth >= context.config.max_depth:
+        context.summary.absorb_folder(depth)
+
+        record = ScanRecord(
+            drive=drive_name(root),
+            item_id=item_id,
+            parent_id=parent_id,
+            item_type="Folder",
+            item_name=directory.name,
+            file_extension="",
+            full_path=normalize_path(directory),
+            depth=depth,
+            owner=owner,
+            size_mb=0.0,
+            size_gb=0.0,
+            file_count_in_folder=0,
+            last_modified=_safe_last_modified(directory),
+            is_simulation_file="N/A",
+            file_category="N/A",
+            scan_datetime=context.scan_datetime,
+            hierarchy=hierarchy,
+        )
+        emit(record)
+        return 0.0
+
     try:
         with os.scandir(directory) as entries:
             entries_list = list(entries)
@@ -170,11 +197,6 @@ def _scan_directory(
                     hierarchy=child_hierarchy,
                     depth=depth + 1,
                 )
-            continue
-
-        # A file under a folder at max depth would be one level deeper,
-        # so it must not be emitted.
-        if depth >= context.config.max_depth:
             continue
 
         if _is_excluded_path(child, context.config):
