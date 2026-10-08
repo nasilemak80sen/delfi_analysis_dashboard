@@ -1,5 +1,7 @@
 param(
-    [string[]]$Root = @("X:\Reservoir Engineering"),
+    [Parameter(Mandatory = $true)]
+    [string[]]$Root,
+
     [int]$MaxDepth = 5,
     [switch]$SkipOwnerInfo
 )
@@ -19,4 +21,4 @@ if ($SkipOwnerInfo) {
     $argsList += "--skip-owner-info"
 }
 
-python -m storage_crawler.main @argsList
+py -3.13 -m storage_crawler.main @argsList
