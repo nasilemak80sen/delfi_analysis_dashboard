@@ -114,3 +114,25 @@ It deliberately does not require identical `ItemID` values or row order.
 6. Build the Jupyter analysis layer.
 7. Feed the validated dataset to Power BI.
 
+
+
+## Large-data architecture
+
+For large inventories, Parquet is the primary storage format and CSV is only a
+compatibility/export format. DuckDB sits above Parquet and builds small analytical
+tables for Jupyter and Power BI.
+
+The crawler writes Parquet in bounded batches through PyArrow. It does not build
+the full inventory in pandas.
+
+For an existing large CSV:
+
+py -3.13 -m pip install --user duckdb pyarrow pandas jupyterlab
+
+py -3.13 scripts\build_analytics.py --csv "C:\path\to\STORAGE_ANALYSIS.csv" --memory-limit 4GB
+
+This produces a Parquet file, a small DuckDB database, and compact summary tables.
+
+Do not use a full-data pandas read such as df = pd.read_csv(...) for the 3.5 GB
+inventory.
+
