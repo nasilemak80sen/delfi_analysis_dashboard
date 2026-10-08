@@ -31,6 +31,44 @@ def connect(
     return con
 
 
+CSV_DUCKDB_TYPES = {
+    "Drive": "VARCHAR",
+    "ItemID": "BIGINT",
+    "ParentID": "BIGINT",
+    "ItemType": "VARCHAR",
+    "ItemName": "VARCHAR",
+    "FileExtension": "VARCHAR",
+    "FullPath": "VARCHAR",
+    "Depth": "BIGINT",
+    "Owner": "VARCHAR",
+    "SizeMB": "DOUBLE",
+    "SizeGB": "DOUBLE",
+    "FileCountInFolder": "BIGINT",
+    "LastModified": "VARCHAR",
+    "IsSimulationFile": "VARCHAR",
+    "FileCategory": "VARCHAR",
+    "ScanDateTime": "VARCHAR",
+    **{f"L{i}_Name": "VARCHAR" for i in range(1, 11)},
+}
+
+_CSV_COLUMNS_SQL = "{ " + ", ".join(
+    f"'{name}': '{dtype}'" for name, dtype in CSV_DUCKDB_TYPES.items()
+) + " }"
+
+
+def _csv_relation_sql(csv_path: Path) -> str:
+    return (
+        f"read_csv('{_sql_path(csv_path)}', "
+        "header = true, "
+        "delim = ',', "
+        "quote = '\"', "
+        "escape = '\"', "
+        f"columns = {_CSV_COLUMNS_SQL}, "
+        "strict_mode = true, "
+        "null_padding = false)"
+    )
+
+
 def convert_csv_to_parquet(
     csv_path: Path,
     parquet_path: Path,
@@ -42,31 +80,24 @@ def convert_csv_to_parquet(
 
     if not csv_path.exists():
         raise FileNotFoundError(csv_path)
+    if row_group_size <= 0:
+        raise ValueError("row_group_size must be > 0")
 
     parquet_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = parquet_path.with_name(parquet_path.name + ".part")
+
+    if temp_path.exists():
+        temp_path.unlink()
 
     con = connect(memory_limit=memory_limit)
     try:
-        source = _sql_path(csv_path)
-        target = _sql_path(parquet_path)
-
         con.execute(
             f"""
             COPY (
                 SELECT *
-                FROM read_csv(
-                    '{source}',
-                    header = true,
-                    delim = ',',
-                    quote = '"',
-                    escape = '"',
-                    sample_size = -1,
-                    union_by_name = true,
-                    strict_mode = true,
-                    null_padding = false
-                )
+                FROM {_csv_relation_sql(csv_path)}
             )
-            TO '{target}'
+            TO '{_sql_path(temp_path)}'
             (
                 FORMAT PARQUET,
                 COMPRESSION ZSTD,
@@ -74,9 +105,14 @@ def convert_csv_to_parquet(
             )
             """
         )
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
     finally:
         con.close()
 
+    temp_path.replace(parquet_path)
     return parquet_path
 
 
@@ -135,9 +171,15 @@ def create_analytics_database(
                     WHERE ItemType = 'File'
                       AND (SizeGB IS NULL OR SizeGB < 0)
                 ) AS invalid_file_sizes,
+                SUM(SizeGB) FILTER (WHERE ItemType = 'File') AS total_file_storage_gb,
                 COUNT(*) FILTER (
-                    WHERE LastModified IS NULL
-                ) AS missing_modified_dates
+                    WHERE LastModified IS NULL OR LastModified = ''
+                ) AS missing_modified_dates,
+                COUNT(*) FILTER (
+                    WHERE LastModified IS NOT NULL
+                      AND LastModified <> ''
+                      AND TRY_CAST(LastModified AS TIMESTAMP) IS NULL
+                ) AS invalid_modified_dates
             FROM storage_detail
             """
         )
@@ -209,7 +251,7 @@ def create_analytics_database(
                     *,
                     date_diff(
                         'day',
-                        LastModified,
+                        TRY_CAST(LastModified AS TIMESTAMP),
                         current_timestamp
                     ) AS age_days
                 FROM storage_detail
@@ -235,7 +277,7 @@ def create_analytics_database(
                 LastModified,
                 date_diff(
                     'day',
-                    LastModified,
+                    TRY_CAST(LastModified AS TIMESTAMP),
                     current_timestamp
                 ) AS age_days,
                 IsSimulationFile
@@ -244,7 +286,7 @@ def create_analytics_database(
               AND LastModified IS NOT NULL
               AND date_diff(
                     'day',
-                    LastModified,
+                    TRY_CAST(LastModified AS TIMESTAMP),
                     current_timestamp
                   ) >= {int(stale_days)}
             ORDER BY SizeGB DESC
@@ -309,7 +351,7 @@ def create_analytics_database(
                     *,
                     date_diff(
                         'day',
-                        LastModified,
+                        TRY_CAST(LastModified AS TIMESTAMP),
                         current_timestamp
                     ) AS age_days
                 FROM storage_detail
